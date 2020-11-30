@@ -239,21 +239,6 @@ struct AppLaunchEventState {
         } else {
           LOG(WARNING) << "Negative event timestamp: " << event.timestamp_nanos;
         }
-
-        // Optimistically start tracing if we have the activity in the intent.
-        if (!event.intent_proto->has_component()) {
-          // Can't do anything if there is no component in the proto.
-          LOG(VERBOSE) << "AppLaunchEventState#OnNewEvent: no component, can't trace";
-          break;
-        }
-
-        if (allowed_readahead_) {
-          StartReadAhead(sequence_id_, component_name);
-        }
-        if (allowed_tracing_ && !IsReadAhead()) {
-          rx_lifetime_ = StartTracing(std::move(component_name));
-        }
-
         break;
       }
       case Type::kIntentFailed:
@@ -262,9 +247,6 @@ struct AppLaunchEventState {
                        << " ignored due to blacklisting.";
           break;
         }
-
-        AbortTrace();
-        AbortReadAhead();
 
         if (history_id_subscriber_) {
           history_id_subscriber_->on_error(rxcpp::util::make_error_ptr(
@@ -300,10 +282,7 @@ struct AppLaunchEventState {
         AppLaunchEvent::Temperature temperature = event.temperature;
         temperature_ = temperature;
         if (temperature != AppLaunchEvent::Temperature::kCold) {
-          LOG(DEBUG) << "AppLaunchEventState#OnNewEvent aborting trace due to non-cold temperature";
-
-          AbortTrace();
-          AbortReadAhead();
+          LOG(DEBUG) << "AppLaunchEventState#OnNewEvent don't trace due to non-cold temperature";
         } else if (!IsTracing() && !IsReadAhead()) {  // and the temperature is Cold.
           // Start late trace when intent didn't have a component name
           LOG(VERBOSE) << "AppLaunchEventState#OnNewEvent need to start new trace";
