@@ -1077,28 +1077,32 @@ class EventManager::Impl {
   }
 
   // Runs the maintenance code to compile perfetto traces to compiled
-  // trace.
+  // trace for a package.
   void StartMaintenance(bool output_text,
                         std::optional<std::string> inode_textcache,
                         bool verbose,
                         bool recompile,
-                        uint64_t min_traces) {
+                        uint64_t min_traces,
+                        std::string package_name,
+                        bool should_update_versions) {
     ScopedFormatTrace atrace_bg_scope(ATRACE_TAG_PACKAGE_MANAGER,
                                       "Background Job Scope");
 
-    {
-      ScopedFormatTrace atrace_update_versions(ATRACE_TAG_PACKAGE_MANAGER,
-                                               "Update package versions map cache");
-      // Update the version map.
-      version_map_->UpdateAll();
-    }
-
     db::DbHandle db{db::SchemaModel::GetSingleton()};
-    {
-      ScopedFormatTrace atrace_cleanup_db(ATRACE_TAG_PACKAGE_MANAGER,
-                                          "Clean up obsolete data in database");
-      // Cleanup the obsolete data in the database.
-      maintenance::CleanUpDatabase(db, version_map_);
+    if (should_update_versions) {
+      {
+        ScopedFormatTrace atrace_update_versions(ATRACE_TAG_PACKAGE_MANAGER,
+                                                 "Update package versions map cache");
+        // Update the version map.
+        version_map_->UpdateAll();
+      }
+
+      {
+        ScopedFormatTrace atrace_cleanup_db(ATRACE_TAG_PACKAGE_MANAGER,
+                                            "Clean up obsolete data in database");
+        // Cleanup the obsolete data in the database.
+        maintenance::CleanUpDatabase(db, version_map_);
+      }
     }
 
     {
@@ -1114,7 +1118,7 @@ class EventManager::Impl {
         std::make_shared<maintenance::Exec>()};
 
       LOG(DEBUG) << "StartMaintenance: min_traces=" << min_traces;
-      maintenance::CompileAppsOnDevice(db, params);
+      maintenance::CompileSingleAppOnDevice(db, params, package_name);
     }
   }
 
@@ -1136,11 +1140,14 @@ class EventManager::Impl {
         LOG(VERBOSE) << "EventManager#JobScheduledEvent#tap(1) - job begins";
         this->NotifyProgress(e.first, TaskResult{TaskResult::State::kBegan});
 
+        LOG(VERBOSE) << "Compile " << std::get<1>(e).package_name;
         StartMaintenance(/*output_text=*/false,
                          /*inode_textcache=*/std::nullopt,
                          /*verbose=*/false,
                          /*recompile=*/false,
-                         s_min_traces);
+                         s_min_traces,
+                         std::get<1>(e).package_name,
+                         std::get<1>(e).should_update_versions);
 
         // TODO: probably this shouldn't be emitted until most of the usual DCHECKs
         // (for example, validate a job isn't already started, the request is not reused, etc).
